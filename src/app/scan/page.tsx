@@ -7,7 +7,7 @@ import {
     calculateDistance,
     SHOP_LOCATION,
     MAX_DISTANCE_METERS,
-    isWithinTimeWindow,
+    isWithinStaffTimeWindow, // Changed from isWithinTimeWindow
     calculateLateDuration
 } from "@/lib/attendance";
 
@@ -26,14 +26,7 @@ export default function ScanPage() {
         if (storedShop) setShopName(storedShop);
 
         const init = async () => {
-            // 1. Check Time Window
-            if (!isWithinTimeWindow()) {
-                setError("Attendance window (08:45 AM - 09:30 AM) is closed.");
-                setLoading(false);
-                return;
-            }
-
-            // 2. Fetch Staff Records from Supabase
+            // 1. Fetch Staff Records from Supabase
             const { data: staffData, error: staffError } = await supabase
                 .from('staff')
                 .select('*')
@@ -47,7 +40,7 @@ export default function ScanPage() {
             }
             setStaffRecords(staffData || []);
 
-            // 3. Check Geolocation
+            // 2. Check Geolocation
             if (!navigator.geolocation) {
                 setError("Geolocation is not supported by your browser.");
                 setLoading(false);
@@ -100,6 +93,12 @@ export default function ScanPage() {
 
         if (registeredStaffId && String(registeredStaffId) !== String(staff.id)) {
             setError(`SECURITY ALERT: This device is already registered to another user. You cannot use a friend's phone to check in.`);
+            return;
+        }
+
+        // 1.5. Validate Individual Time Window
+        if (!isWithinStaffTimeWindow(staff.shift)) {
+            setError(`You are outside your allowed attendance window for your shift (${staff.shift}).`);
             return;
         }
 
