@@ -98,22 +98,36 @@ export default function ScanPage() {
         // 1. Strict Device Binding: Lock hardware to a specific staff member
         const registeredStaffId = localStorage.getItem("registered_staff_id");
 
-        if (registeredStaffId && parseInt(registeredStaffId) !== staff.id) {
-            setError(`SECURITY ALERT: This device is already registered to another user (ID: ${registeredStaffId}). You cannot use a friend's phone to check in.`);
+        if (registeredStaffId && String(registeredStaffId) !== String(staff.id)) {
+            setError(`SECURITY ALERT: This device is already registered to another user. You cannot use a friend's phone to check in.`);
             return;
         }
 
-        // 2. One attendance per day rule
-        const deviceAttendance = localStorage.getItem("attendance_marked_today");
-        const todayStr = new Date().toDateString();
-
-        if (deviceAttendance === todayStr) {
+        // 2. One attendance per day rule (checking Supabase directly)
+        const todayStr = new Date().toISOString().split('T')[0];
+        
+        setLoading(true);
+        setStatus("Verifying attendance records...");
+        
+        const { data: existingRecords, error: checkError } = await supabase
+            .from('attendance')
+            .select('id')
+            .eq('staff_id', staff.id)
+            .eq('date', todayStr);
+            
+        if (checkError) {
+            setError("Failed to verify records: " + checkError.message);
+            setLoading(false);
+            return;
+        }
+        
+        if (existingRecords && existingRecords.length > 0) {
             setError("You have already marked attendance today.");
+            setLoading(false);
             return;
         }
 
         // Record attendance in Supabase
-        setLoading(true);
         setStatus(`Recording attendance for ${staff.name}...`);
 
         // Calculate lateness
