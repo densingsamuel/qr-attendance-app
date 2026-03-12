@@ -7,11 +7,11 @@ export const SHOP_LOCATION = {
     lng: 79.96529379598987,
 };
 
-export const MAX_DISTANCE_METERS = 5000; // Increased to 5km for testing
+export const MAX_DISTANCE_METERS = 50;
 
 export const QR_VALID_WINDOW = {
-    start: "00:00",
-    end: "23:59", // Open for testing
+    start: "08:45",
+    end: "09:30",
 };
 
 /**
@@ -102,6 +102,29 @@ export function isWithinTimeWindow(): boolean {
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     return currentTime >= QR_VALID_WINDOW.start && currentTime <= QR_VALID_WINDOW.end;
+}
+
+/**
+ * Check if the current time is within the staff's specific shift window.
+ */
+export function isWithinStaffTimeWindow(shiftStr: string | null): boolean {
+    if (!shiftStr || !shiftStr.includes(' - ')) {
+        return true; // Allow if no shift defined
+    }
+
+    const [startStr, endStr] = shiftStr.split(' - ');
+    const startMinutes = parseTimeMinutes(startStr);
+    const endMinutes = parseTimeMinutes(endStr);
+    
+    if (isNaN(startMinutes) || isNaN(endMinutes) || startMinutes === 0) {
+        return true;
+    }
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    // Allow checking in up to 120 minutes before the shift starts, and anytime before shift ends.
+    return currentMinutes >= (startMinutes - 120) && currentMinutes <= endMinutes;
 }
 
 /**
