@@ -12,6 +12,8 @@ export default function ReportsPage() {
     const [loading, setLoading] = useState(true);
     const [selectedStaff, setSelectedStaff] = useState<any>(null);
     const [staffDetails, setStaffDetails] = useState<any[]>([]);
+    const [exportingPDF, setExportingPDF] = useState(false);
+    const [exportingCSV, setExportingCSV] = useState(false);
 
     useEffect(() => {
         fetchReport();
@@ -55,10 +57,14 @@ export default function ReportsPage() {
             return {
                 id: s.id,
                 name: s.name,
+                phone: s.phone,
+                shift: s.shift,
                 present: present + holidays + halfDays + lateCount,
+                halfDays,
                 late: lateCount,
                 lateDuration: totalLateDuration,
                 absent: leaves,
+                holidays,
                 leaveAllowance: s.leave_allowance || 2,
                 totalWorkingDays: 26,
                 allRecords: staffAtt
@@ -69,12 +75,270 @@ export default function ReportsPage() {
         setLoading(false);
     };
 
-    const handleExportCSV = () => {
-        alert("Downloading CSV report for " + selectedMonth);
+    const getMonthLabel = () => {
+        return new Date(selectedMonth + "-01").toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     };
 
-    const handleExportPDF = () => {
-        alert("Downloading PDF report for " + selectedMonth);
+    const getShopName = () => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem("attendance_shop_name") || "QR Attend";
+        }
+        return "QR Attend";
+    };
+
+    // ---- PDF Export ----
+    const handleExportPDF = async () => {
+        if (reportData.length === 0) {
+            alert("No data to export.");
+            return;
+        }
+
+        setExportingPDF(true);
+
+        try {
+            const jsPDFModule = await import('jspdf');
+            const jsPDF = jsPDFModule.default;
+            await import('jspdf-autotable');
+
+            const doc = new jsPDF('p', 'mm', 'a4') as any;
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const shopName = getShopName();
+            const monthLabel = getMonthLabel();
+            let y = 15;
+
+            // ========== COVER HEADER ==========
+            doc.setFillColor(8, 160, 69); // Green header bar
+            doc.rect(0, 0, pageWidth, 40, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(22);
+            doc.setFont('helvetica', 'bold');
+            doc.text(shopName, pageWidth / 2, 18, { align: 'center' });
+            doc.setFontSize(13);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Monthly Attendance Report - ${monthLabel}`, pageWidth / 2, 30, { align: 'center' });
+
+            doc.setTextColor(100, 100, 100);
+            doc.setFontSize(9);
+            doc.text(`Generated on: ${new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`, pageWidth / 2, 50, { align: 'center' });
+
+            // ========== OVERALL STATS ==========
+            y = 60;
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(30, 41, 59);
+            doc.text('Overall Summary', 14, y);
+            y += 8;
+
+            const totalPresent = reportData.reduce((a, r) => a + r.present, 0);
+            const totalAbsent = reportData.reduce((a, r) => a + r.absent, 0);
+            const totalLate = reportData.reduce((a, r) => a + r.late, 0);
+            const avgAttendance = reportData.length ? Math.round((totalPresent / (reportData.length * 26)) * 100) : 0;
+
+            const statsData = [
+                ['Total Staff', 'Total Present Days', 'Total Absent Days', 'Total Late Count', 'Avg Attendance %'],
+                [
+                    String(reportData.length),
+                    String(totalPresent),
+                    String(totalAbsent),
+                    String(totalLate),
+                    `${avgAttendance}%`
+                ]
+            ];
+
+            doc.autoTable({
+                startY: y,
+                head: [statsData[0]],
+                body: [statsData[1]],
+                theme: 'grid',
+                headStyles: { fillColor: [8, 160, 69], textColor: 255, fontSize: 9, halign: 'center', fontStyle: 'bold' },
+                bodyStyles: { fontSize: 11, halign: 'center', fontStyle: 'bold', textColor: [30, 41, 59] },
+                margin: { left: 14, right: 14 },
+            });
+            y = doc.lastAutoTable.finalY + 12;
+
+            // ========== STAFF SUMMARY TABLE ==========
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Staff-wise Summary', 14, y);
+            y += 6;
+
+            const summaryHead = ['#', 'Staff Name', 'Present', 'Half Day', 'Late', 'Late Duration', 'Leaves', 'Leave Balance'];
+            const summaryBody = reportData.map((r, i) => [
+                String(i + 1),
+                r.name,
+                `${r.present} / 26`,
+                String(r.halfDays),
+                String(r.late),
+                r.lateDuration,
+                String(r.absent),
+                `${Math.max(0, r.leaveAllowance - r.absent)} / ${r.leaveAllowance}`
+            ]);
+
+            doc.autoTable({
+                startY: y,
+                head: [summaryHead],
+                body: summaryBody,
+                theme: 'striped',
+                headStyles: { fillColor: [8, 160, 69], textColor: 255, fontSize: 8, halign: 'center', fontStyle: 'bold' },
+                bodyStyles: { fontSize: 8, halign: 'center' },
+                columnStyles: { 1: { halign: 'left' } },
+                margin: { left: 14, right: 14 },
+            });
+            y = doc.lastAutoTable.finalY + 15;
+
+            // ========== PER-STAFF DETAILED BREAKDOWN ==========
+            for (let idx = 0; idx < reportData.length; idx++) {
+                const staff = reportData[idx];
+                const records = [...(staff.allRecords || [])].sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+                // Check if we need a new page
+                if (y > 230) {
+                    doc.addPage();
+                    y = 15;
+                }
+
+                // Staff section header
+                doc.setFillColor(240, 253, 244); // Light green bg
+                doc.rect(14, y - 5, pageWidth - 28, 18, 'F');
+                doc.setDrawColor(8, 160, 69);
+                doc.rect(14, y - 5, pageWidth - 28, 18, 'S');
+
+                doc.setFontSize(11);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(22, 101, 52);
+                doc.text(`${idx + 1}. ${staff.name}`, 18, y + 2);
+
+                doc.setFontSize(8);
+                doc.setFont('helvetica', 'normal');
+                doc.setTextColor(100, 116, 139);
+                doc.text(`Present: ${staff.present} | Late: ${staff.late} (${staff.lateDuration}) | Absent: ${staff.absent} | Shift: ${staff.shift || 'N/A'}`, 18, y + 9);
+
+                y += 18;
+
+                // Daily records table
+                if (records.length === 0) {
+                    doc.setFontSize(9);
+                    doc.setTextColor(150, 150, 150);
+                    doc.text('No attendance records for this month.', 18, y + 4);
+                    y += 12;
+                } else {
+                    const detailHead = ['Date', 'Day', 'Check-in Time', 'Status', 'Late Duration', 'Source'];
+                    const detailBody = records.map((r: any) => {
+                        const d = new Date(r.date);
+                        const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+                        const dateFormatted = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+                        const checkIn = r.check_in ? new Date(r.check_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '-';
+                        const source = r.device_id === 'ADMIN_MANUAL' ? 'Admin' : 'QR Scan';
+
+                        return [dateFormatted, dayName, checkIn, r.status, r.late_duration || '-', source];
+                    });
+
+                    doc.autoTable({
+                        startY: y,
+                        head: [detailHead],
+                        body: detailBody,
+                        theme: 'grid',
+                        headStyles: { fillColor: [100, 116, 139], textColor: 255, fontSize: 7.5, halign: 'center', fontStyle: 'bold' },
+                        bodyStyles: { fontSize: 7.5, halign: 'center' },
+                        columnStyles: {
+                            0: { halign: 'left', cellWidth: 30 },
+                            1: { cellWidth: 18 },
+                            3: { fontStyle: 'bold' },
+                        },
+                        margin: { left: 14, right: 14 },
+                        didParseCell: function (data: any) {
+                            // Color-code status cells
+                            if (data.column.index === 3 && data.section === 'body') {
+                                const status = data.cell.raw;
+                                if (status === 'Present') {
+                                    data.cell.styles.textColor = [22, 101, 52];
+                                } else if (status === 'Late') {
+                                    data.cell.styles.textColor = [194, 65, 12];
+                                } else if (status === 'Leave') {
+                                    data.cell.styles.textColor = [153, 27, 27];
+                                } else if (status === 'Half Day') {
+                                    data.cell.styles.textColor = [133, 77, 14];
+                                } else if (status === 'Holiday') {
+                                    data.cell.styles.textColor = [3, 105, 161];
+                                }
+                            }
+                            // Color late duration
+                            if (data.column.index === 4 && data.section === 'body' && data.cell.raw !== '-') {
+                                data.cell.styles.textColor = [239, 68, 68];
+                                data.cell.styles.fontStyle = 'bold';
+                            }
+                        }
+                    });
+                    y = doc.lastAutoTable.finalY + 12;
+                }
+            }
+
+            // ========== FOOTER ON LAST PAGE ==========
+            const pageCount = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
+                doc.setFontSize(8);
+                doc.setTextColor(150, 150, 150);
+                doc.text(
+                    `${shopName} - Attendance Report - ${monthLabel} | Page ${i} of ${pageCount}`,
+                    pageWidth / 2,
+                    doc.internal.pageSize.getHeight() - 8,
+                    { align: 'center' }
+                );
+            }
+
+            doc.save(`Attendance_Report_${selectedMonth}.pdf`);
+        } catch (err: any) {
+            console.error("PDF export error:", err);
+            alert("Error generating PDF: " + err.message);
+        }
+
+        setExportingPDF(false);
+    };
+
+    // ---- CSV Export ----
+    const handleExportCSV = () => {
+        if (reportData.length === 0) {
+            alert("No data to export.");
+            return;
+        }
+
+        setExportingCSV(true);
+        const shopName = getShopName();
+        const monthLabel = getMonthLabel();
+
+        let csvContent = `${shopName} - Attendance Report - ${monthLabel}\n\n`;
+
+        // Summary section
+        csvContent += 'STAFF SUMMARY\n';
+        csvContent += 'Staff Name,Present Days,Half Days,Late Count,Total Late Duration,Leaves Used,Leave Allowance,Leave Balance\n';
+        reportData.forEach(r => {
+            csvContent += `"${r.name}",${r.present},${r.halfDays},${r.late},"${r.lateDuration}",${r.absent},${r.leaveAllowance},${Math.max(0, r.leaveAllowance - r.absent)}\n`;
+        });
+
+        csvContent += '\n\nDETAILED DAILY RECORDS\n';
+        csvContent += 'Staff Name,Date,Day,Check-in Time,Status,Late Duration,Source\n';
+
+        reportData.forEach(staff => {
+            const records = [...(staff.allRecords || [])].sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            records.forEach((r: any) => {
+                const d = new Date(r.date);
+                const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+                const dateFormatted = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+                const checkIn = r.check_in ? new Date(r.check_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '-';
+                const source = r.device_id === 'ADMIN_MANUAL' ? 'Admin' : 'QR Scan';
+                csvContent += `"${staff.name}","${dateFormatted}","${dayName}","${checkIn}","${r.status}","${r.late_duration || '-'}","${source}"\n`;
+            });
+        });
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `Attendance_Report_${selectedMonth}.csv`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+
+        setExportingCSV(false);
     };
 
     return (
@@ -85,11 +349,11 @@ export default function ReportsPage() {
                     <p className={styles.dashboardSubtitle}>View staff presence, late duration, and leave balances.</p>
                 </div>
                 <div style={{ display: 'flex', gap: '1rem' }}>
-                    <button className="btn btn-outline" onClick={handleExportCSV}>
-                        📥 Export CSV
+                    <button className="btn btn-outline" onClick={handleExportCSV} disabled={exportingCSV}>
+                        {exportingCSV ? '⏳ Exporting...' : '📥 Export CSV'}
                     </button>
-                    <button className="btn btn-primary" onClick={handleExportPDF}>
-                        📄 Export PDF
+                    <button className="btn btn-primary" onClick={handleExportPDF} disabled={exportingPDF}>
+                        {exportingPDF ? '⏳ Generating...' : '📄 Export PDF'}
                     </button>
                 </div>
             </div>
