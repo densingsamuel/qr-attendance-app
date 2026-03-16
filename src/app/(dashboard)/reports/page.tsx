@@ -98,9 +98,10 @@ export default function ReportsPage() {
         try {
             const jsPDFModule = await import('jspdf');
             const jsPDF = jsPDFModule.default;
-            await import('jspdf-autotable');
+            const autoTableModule = await import('jspdf-autotable');
+            const autoTable = autoTableModule.default;
 
-            const doc = new jsPDF('p', 'mm', 'a4') as any;
+            const doc = new jsPDF('p', 'mm', 'a4');
             const pageWidth = doc.internal.pageSize.getWidth();
             const shopName = getShopName();
             const monthLabel = getMonthLabel();
@@ -145,7 +146,7 @@ export default function ReportsPage() {
                 ]
             ];
 
-            doc.autoTable({
+            autoTable(doc, {
                 startY: y,
                 head: [statsData[0]],
                 body: [statsData[1]],
@@ -154,11 +155,12 @@ export default function ReportsPage() {
                 bodyStyles: { fontSize: 11, halign: 'center', fontStyle: 'bold', textColor: [30, 41, 59] },
                 margin: { left: 14, right: 14 },
             });
-            y = doc.lastAutoTable.finalY + 12;
+            y = (doc as any).lastAutoTable.finalY + 12;
 
             // ========== STAFF SUMMARY TABLE ==========
             doc.setFontSize(12);
             doc.setFont('helvetica', 'bold');
+            doc.setTextColor(30, 41, 59);
             doc.text('Staff-wise Summary', 14, y);
             y += 6;
 
@@ -174,7 +176,7 @@ export default function ReportsPage() {
                 `${Math.max(0, r.leaveAllowance - r.absent)} / ${r.leaveAllowance}`
             ]);
 
-            doc.autoTable({
+            autoTable(doc, {
                 startY: y,
                 head: [summaryHead],
                 body: summaryBody,
@@ -184,7 +186,7 @@ export default function ReportsPage() {
                 columnStyles: { 1: { halign: 'left' } },
                 margin: { left: 14, right: 14 },
             });
-            y = doc.lastAutoTable.finalY + 15;
+            y = (doc as any).lastAutoTable.finalY + 15;
 
             // ========== PER-STAFF DETAILED BREAKDOWN ==========
             for (let idx = 0; idx < reportData.length; idx++) {
@@ -233,7 +235,7 @@ export default function ReportsPage() {
                         return [dateFormatted, dayName, checkIn, r.status, r.late_duration || '-', source];
                     });
 
-                    doc.autoTable({
+                    autoTable(doc, {
                         startY: y,
                         head: [detailHead],
                         body: detailBody,
@@ -269,12 +271,12 @@ export default function ReportsPage() {
                             }
                         }
                     });
-                    y = doc.lastAutoTable.finalY + 12;
+                    y = (doc as any).lastAutoTable.finalY + 12;
                 }
             }
 
             // ========== FOOTER ON LAST PAGE ==========
-            const pageCount = doc.internal.getNumberOfPages();
+            const pageCount = (doc as any).internal.getNumberOfPages();
             for (let i = 1; i <= pageCount; i++) {
                 doc.setPage(i);
                 doc.setFontSize(8);
