@@ -86,6 +86,21 @@ export default function ReportsPage() {
         return "QR Attend";
     };
 
+    // Helper: load external script dynamically
+    const loadScript = (src: string): Promise<void> => {
+        return new Promise((resolve, reject) => {
+            if (document.querySelector(`script[src="${src}"]`)) {
+                resolve();
+                return;
+            }
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+            document.head.appendChild(script);
+        });
+    };
+
     // ---- PDF Export ----
     const handleExportPDF = async () => {
         if (reportData.length === 0) {
@@ -96,11 +111,11 @@ export default function ReportsPage() {
         setExportingPDF(true);
 
         try {
-            const jsPDFModule = await import('jspdf');
-            const jsPDF = jsPDFModule.default;
-            const autoTableModule = await import('jspdf-autotable');
-            const autoTable = autoTableModule.default;
+            // Load jsPDF and jspdf-autotable via CDN to avoid bundler/module compatibility issues
+            await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+            await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.3/jspdf.plugin.autotable.min.js');
 
+            const { jsPDF } = (window as any).jspdf;
             const doc = new jsPDF('p', 'mm', 'a4');
             const pageWidth = doc.internal.pageSize.getWidth();
             const shopName = getShopName();
@@ -108,7 +123,7 @@ export default function ReportsPage() {
             let y = 15;
 
             // ========== COVER HEADER ==========
-            doc.setFillColor(8, 160, 69); // Green header bar
+            doc.setFillColor(8, 160, 69);
             doc.rect(0, 0, pageWidth, 40, 'F');
             doc.setTextColor(255, 255, 255);
             doc.setFontSize(22);
@@ -130,32 +145,21 @@ export default function ReportsPage() {
             doc.text('Overall Summary', 14, y);
             y += 8;
 
-            const totalPresent = reportData.reduce((a, r) => a + r.present, 0);
-            const totalAbsent = reportData.reduce((a, r) => a + r.absent, 0);
-            const totalLate = reportData.reduce((a, r) => a + r.late, 0);
+            const totalPresent = reportData.reduce((a: number, r: any) => a + r.present, 0);
+            const totalAbsent = reportData.reduce((a: number, r: any) => a + r.absent, 0);
+            const totalLate = reportData.reduce((a: number, r: any) => a + r.late, 0);
             const avgAttendance = reportData.length ? Math.round((totalPresent / (reportData.length * 26)) * 100) : 0;
 
-            const statsData = [
-                ['Total Staff', 'Total Present Days', 'Total Absent Days', 'Total Late Count', 'Avg Attendance %'],
-                [
-                    String(reportData.length),
-                    String(totalPresent),
-                    String(totalAbsent),
-                    String(totalLate),
-                    `${avgAttendance}%`
-                ]
-            ];
-
-            autoTable(doc, {
+            doc.autoTable({
                 startY: y,
-                head: [statsData[0]],
-                body: [statsData[1]],
+                head: [['Total Staff', 'Total Present Days', 'Total Absent Days', 'Total Late Count', 'Avg Attendance %']],
+                body: [[String(reportData.length), String(totalPresent), String(totalAbsent), String(totalLate), `${avgAttendance}%`]],
                 theme: 'grid',
                 headStyles: { fillColor: [8, 160, 69], textColor: 255, fontSize: 9, halign: 'center', fontStyle: 'bold' },
                 bodyStyles: { fontSize: 11, halign: 'center', fontStyle: 'bold', textColor: [30, 41, 59] },
                 margin: { left: 14, right: 14 },
             });
-            y = (doc as any).lastAutoTable.finalY + 12;
+            y = doc.lastAutoTable.finalY + 12;
 
             // ========== STAFF SUMMARY TABLE ==========
             doc.setFontSize(12);
@@ -165,18 +169,12 @@ export default function ReportsPage() {
             y += 6;
 
             const summaryHead = ['#', 'Staff Name', 'Present', 'Half Day', 'Late', 'Late Duration', 'Leaves', 'Leave Balance'];
-            const summaryBody = reportData.map((r, i) => [
-                String(i + 1),
-                r.name,
-                `${r.present} / 26`,
-                String(r.halfDays),
-                String(r.late),
-                r.lateDuration,
-                String(r.absent),
-                `${Math.max(0, r.leaveAllowance - r.absent)} / ${r.leaveAllowance}`
+            const summaryBody = reportData.map((r: any, i: number) => [
+                String(i + 1), r.name, `${r.present} / 26`, String(r.halfDays), String(r.late),
+                r.lateDuration, String(r.absent), `${Math.max(0, r.leaveAllowance - r.absent)} / ${r.leaveAllowance}`
             ]);
 
-            autoTable(doc, {
+            doc.autoTable({
                 startY: y,
                 head: [summaryHead],
                 body: summaryBody,
@@ -186,97 +184,77 @@ export default function ReportsPage() {
                 columnStyles: { 1: { halign: 'left' } },
                 margin: { left: 14, right: 14 },
             });
-            y = (doc as any).lastAutoTable.finalY + 15;
+            y = doc.lastAutoTable.finalY + 15;
 
             // ========== PER-STAFF DETAILED BREAKDOWN ==========
             for (let idx = 0; idx < reportData.length; idx++) {
                 const staff = reportData[idx];
                 const records = [...(staff.allRecords || [])].sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-                // Check if we need a new page
-                if (y > 230) {
-                    doc.addPage();
-                    y = 15;
-                }
+                if (y > 230) { doc.addPage(); y = 15; }
 
-                // Staff section header
-                doc.setFillColor(240, 253, 244); // Light green bg
+                doc.setFillColor(240, 253, 244);
                 doc.rect(14, y - 5, pageWidth - 28, 18, 'F');
                 doc.setDrawColor(8, 160, 69);
                 doc.rect(14, y - 5, pageWidth - 28, 18, 'S');
-
                 doc.setFontSize(11);
                 doc.setFont('helvetica', 'bold');
                 doc.setTextColor(22, 101, 52);
                 doc.text(`${idx + 1}. ${staff.name}`, 18, y + 2);
-
                 doc.setFontSize(8);
                 doc.setFont('helvetica', 'normal');
                 doc.setTextColor(100, 116, 139);
                 doc.text(`Present: ${staff.present} | Late: ${staff.late} (${staff.lateDuration}) | Absent: ${staff.absent} | Shift: ${staff.shift || 'N/A'}`, 18, y + 9);
-
                 y += 18;
 
-                // Daily records table
                 if (records.length === 0) {
                     doc.setFontSize(9);
                     doc.setTextColor(150, 150, 150);
                     doc.text('No attendance records for this month.', 18, y + 4);
                     y += 12;
                 } else {
-                    const detailHead = ['Date', 'Day', 'Check-in Time', 'Status', 'Late Duration', 'Source'];
                     const detailBody = records.map((r: any) => {
                         const d = new Date(r.date);
-                        const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
-                        const dateFormatted = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
-                        const checkIn = r.check_in ? new Date(r.check_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '-';
-                        const source = r.device_id === 'ADMIN_MANUAL' ? 'Admin' : 'QR Scan';
-
-                        return [dateFormatted, dayName, checkIn, r.status, r.late_duration || '-', source];
+                        return [
+                            d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }),
+                            d.toLocaleDateString('en-US', { weekday: 'short' }),
+                            r.check_in ? new Date(r.check_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '-',
+                            r.status,
+                            r.late_duration || '-',
+                            r.device_id === 'ADMIN_MANUAL' ? 'Admin' : 'QR Scan'
+                        ];
                     });
 
-                    autoTable(doc, {
+                    doc.autoTable({
                         startY: y,
-                        head: [detailHead],
+                        head: [['Date', 'Day', 'Check-in Time', 'Status', 'Late Duration', 'Source']],
                         body: detailBody,
                         theme: 'grid',
                         headStyles: { fillColor: [100, 116, 139], textColor: 255, fontSize: 7.5, halign: 'center', fontStyle: 'bold' },
                         bodyStyles: { fontSize: 7.5, halign: 'center' },
-                        columnStyles: {
-                            0: { halign: 'left', cellWidth: 30 },
-                            1: { cellWidth: 18 },
-                            3: { fontStyle: 'bold' },
-                        },
+                        columnStyles: { 0: { halign: 'left', cellWidth: 30 }, 1: { cellWidth: 18 }, 3: { fontStyle: 'bold' } },
                         margin: { left: 14, right: 14 },
                         didParseCell: function (data: any) {
-                            // Color-code status cells
                             if (data.column.index === 3 && data.section === 'body') {
-                                const status = data.cell.raw;
-                                if (status === 'Present') {
-                                    data.cell.styles.textColor = [22, 101, 52];
-                                } else if (status === 'Late') {
-                                    data.cell.styles.textColor = [194, 65, 12];
-                                } else if (status === 'Leave') {
-                                    data.cell.styles.textColor = [153, 27, 27];
-                                } else if (status === 'Half Day') {
-                                    data.cell.styles.textColor = [133, 77, 14];
-                                } else if (status === 'Holiday') {
-                                    data.cell.styles.textColor = [3, 105, 161];
-                                }
+                                const s = data.cell.raw;
+                                if (s === 'Present') data.cell.styles.textColor = [22, 101, 52];
+                                else if (s === 'Late') data.cell.styles.textColor = [194, 65, 12];
+                                else if (s === 'Leave') data.cell.styles.textColor = [153, 27, 27];
+                                else if (s === 'Half Day') data.cell.styles.textColor = [133, 77, 14];
+                                else if (s === 'Holiday') data.cell.styles.textColor = [3, 105, 161];
                             }
-                            // Color late duration
                             if (data.column.index === 4 && data.section === 'body' && data.cell.raw !== '-') {
                                 data.cell.styles.textColor = [239, 68, 68];
                                 data.cell.styles.fontStyle = 'bold';
                             }
                         }
                     });
-                    y = (doc as any).lastAutoTable.finalY + 12;
+                    y = doc.lastAutoTable.finalY + 12;
                 }
             }
 
-            // ========== FOOTER ON LAST PAGE ==========
-            const pageCount = (doc as any).internal.getNumberOfPages();
+            // ========== FOOTER ==========
+            const pageCount = doc.internal.getNumberOfPages();
             for (let i = 1; i <= pageCount; i++) {
                 doc.setPage(i);
                 doc.setFontSize(8);
