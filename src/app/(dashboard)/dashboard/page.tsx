@@ -63,11 +63,39 @@ export default function DashboardPage() {
 
     useEffect(() => {
         fetchData();
+
+        console.log("Setting up Supabase Realtime subscription...");
+
+        // Subscribe to real-time changes on the attendance table
+        const channel = supabase
+            .channel('dashboard_realtime')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*', // Listen for ALL events
+                    schema: 'public',
+                    table: 'attendance',
+                },
+                (payload) => {
+                    console.log('✅ Real-time update received:', payload);
+                    fetchData(); 
+                }
+            )
+            .subscribe((status, err) => {
+                console.log("Subscription status:", status);
+                if (err) console.error("Subscription error:", err);
+            });
+
+        return () => {
+            console.log("Cleaning up subscription...");
+            supabase.removeChannel(channel);
+        };
     }, []);
 
     const fetchData = async () => {
         setLoading(true);
-        const todayStr = new Date().toISOString().split('T')[0];
+        // Use local timezone offset to avoid showing 'yesterday' after UTC midnight
+        const todayStr = new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0];
 
         // 1. Fetch Staff (to get photos and total count)
         const { data: staffData } = await supabase.from('staff').select('*').eq('status', 'Active');
@@ -89,7 +117,7 @@ export default function DashboardPage() {
         setAttendanceList(mergedList);
 
         // 4. Calculate Stats
-        const presentCount = attendance.filter(a => a.status === 'Present').length;
+        const presentCount = attendance.filter(a => a.status === 'Present' || a.status === 'Late').length;
         const halfDayCount = attendance.filter(a => a.status === 'Half Day').length;
         const leaveCount = attendance.filter(a => a.status === 'Leave').length;
 

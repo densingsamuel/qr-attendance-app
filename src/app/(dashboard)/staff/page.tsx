@@ -4,6 +4,10 @@ import { useState, useEffect } from "react";
 import styles from "@/components/Dashboard/Dashboard.module.css";
 import { supabase } from "@/lib/supabase";
 
+const PRESET_AVATARS = [
+    "Felix", "Aneka", "Jack", "Bella", "Coco", "Mimi", "Buster", "Lucy", "Max", "Daisy", "Charlie", "Milo"
+].map(name => `https://api.dicebear.com/7.x/adventurer/svg?seed=${name}`);
+
 const TimePicker = ({ label, value, onChange }: { label: string, value: string, onChange: (val: string) => void }) => {
     // value format: "09:00 AM"
     const [timePart, ampmPart] = value ? value.split(' ') : ["09:00", "AM"];
@@ -326,6 +330,26 @@ export default function StaffPage() {
                                     {!editingStaff.photo_url && !uploading && (
                                         <p style={{ fontSize: '0.75rem', color: 'var(--error)' }}>⚠️ Photo is required for attendance</p>
                                     )}
+                                    <div style={{ marginTop: '0.5rem' }}>
+                                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.4rem', fontWeight: 500 }}>Or choose an avatar:</p>
+                                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                            {PRESET_AVATARS.map((url, i) => (
+                                                <img 
+                                                    key={i} 
+                                                    src={url} 
+                                                    alt={`Avatar ${i}`} 
+                                                    onClick={() => setEditingStaff({...editingStaff, photo_url: url})}
+                                                    style={{ 
+                                                        width: '40px', height: '40px', borderRadius: '50%', cursor: 'pointer',
+                                                        border: editingStaff.photo_url === url ? '3px solid var(--primary)' : '1px solid var(--border)',
+                                                        background: '#e2e8f0', flexShrink: 0,
+                                                        transition: 'transform 0.2s',
+                                                        transform: editingStaff.photo_url === url ? 'scale(1.15)' : 'scale(1)'
+                                                    }} 
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 

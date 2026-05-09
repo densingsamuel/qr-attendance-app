@@ -34,11 +34,19 @@ self.addEventListener('activate', (event) => {
 
 // Fetch event — network first, cache fallback
 self.addEventListener('fetch', (event) => {
+    // Skip non-GET requests (POST, PUT, DELETE, etc.)
+    if (event.request.method !== 'GET') return;
+
+    // Skip Supabase and other API calls to ensure Realtime works
+    if (event.request.url.includes('supabase.co') || event.request.url.includes('/api/')) {
+        return;
+    }
+
     event.respondWith(
         fetch(event.request)
             .then((response) => {
                 // Clone and cache successful responses
-                if (response.status === 200) {
+                if (response && response.status === 200) {
                     const responseClone = response.clone();
                     caches.open(CACHE_NAME).then((cache) => {
                         cache.put(event.request, responseClone);
@@ -46,8 +54,12 @@ self.addEventListener('fetch', (event) => {
                 }
                 return response;
             })
-            .catch(() => {
-                return caches.match(event.request);
+            .catch(async () => {
+                const cachedResponse = await caches.match(event.request);
+                if (cachedResponse) return cachedResponse;
+                
+                // If no cache match and network fails, return a basic error response
+                return new Response('Network error occurred', { status: 408, statusText: 'Network Error' });
             })
     );
 });
